@@ -5,7 +5,6 @@ import json
 import html
 import nbformat
 import codecs
-from aws.s3 import S3
 from StringIO import StringIO
 
 MD = re.compile(r'%md\s')
@@ -17,15 +16,15 @@ def read_io(path):
     """Reads the contents of a local or S3 path into a StringIO.
     """
     note = StringIO()
-    if path.startswith("s3://"):
-        s3 = S3(env='prod')
-        for line in s3.read(path):
+    # if path.startswith("s3://"):
+    #     s3 = S3(env='prod')
+    #     for line in s3.read(path):
+    #         note.write(line)
+    #         note.write("\n")
+    # else:
+    with open(path) as local:
+        for line in local.readlines():
             note.write(line)
-            note.write("\n")
-    else:
-        with open(path) as local:
-            for line in local.readlines():
-                note.write(line)
 
     note.seek(0)
 
@@ -57,12 +56,12 @@ def table_to_html(tsv):
     return "\n".join(lines)
 
 
-def convert_json(zeppelin_json):
+def convert_json(zeppelin_json, p_version):
     """Converts a Zeppelin note from JSON to a Jupyter NotebookNode.
     """
-    return convert_parsed(json.load(zeppelin_json))
+    return convert_parsed(json.load(zeppelin_json), p_version)
 
-def convert_parsed(zeppelin_note):
+def convert_parsed(zeppelin_note, p_version):
     """Converts a Zeppelin note from parsed JSON to a Jupyter NotebookNode.
     """
     notebook_name = zeppelin_note['name']
@@ -102,47 +101,77 @@ def convert_parsed(zeppelin_note):
 
         cells.append(cell)
 
-        result = paragraph.get('result')
-        if cell['cell_type'] == 'code' and result:
-            if result['code'] == 'SUCCESS':
-                result_type = result.get('type')
-                output_by_mime_type = {}
-                if result_type == 'TEXT':
-                    output_by_mime_type['text/plain'] = result['msg']
-                elif result_type == 'HTML':
-                    output_by_mime_type['text/html'] = result['msg']
-                elif result_type == 'TABLE':
-                    output_by_mime_type['text/html'] = table_to_html(result['msg'])
-
-                cell['outputs'] = [{
-                    'output_type': 'execute_result',
-                    'metadata': {},
-                    'execution_count': index,
-                    'data': output_by_mime_type
-                }]
+        # result = paragraph.get('result')
+        # if cell['cell_type'] == 'code' and result:
+        #     if result['code'] == 'SUCCESS':
+        #         result_type = result.get('type')
+        #         output_by_mime_type = {}
+        #         if result_type == 'TEXT':
+        #             output_by_mime_type['text/plain'] = result['msg']
+        #         elif result_type == 'HTML':
+        #             output_by_mime_type['text/html'] = result['msg']
+        #         elif result_type == 'TABLE':
+        #             output_by_mime_type['text/html'] = table_to_html(result['msg'])
+        #
+        #         cell['outputs'] = [{
+        #             'output_type': 'execute_result',
+        #             'metadata': {},
+        #             'execution_count': index,
+        #             'data': output_by_mime_type
+        #         }]
 
         index += 1
 
-    notebook = nbformat.from_dict({
-        "metadata": {
-            "kernelspec": {
-                "display_name": "Spark 2.0.0 - Scala 2.11",
-                "language": "scala",
-                "name": "spark2-scala"
+    if p_version == 3:
+        notebook = nbformat.from_dict({
+            "metadata": {
+                "kernelspec": {
+                    "display_name": "Python 3",
+                    "language": "python",
+                    "name": "python3"
+                },
+                "language_info": {
+                    "codemirror_mode": {
+                        "name": "ipython",
+                        "version": 3
+                    },
+                    "file_extension": ".py",
+                    "mimetype": "text/x-python",
+                    "name": "python",
+                    "nbconvert_exporter": "python",
+                    "pygments_lexer": "ipython3",
+                    "version": "3.6.6"
+                }
             },
-            "language_info": {
-                "codemirror_mode": "text/x-scala",
-                "file_extension": ".scala",
-                "mimetype": "text/x-scala",
-                "name": "scala",
-                "pygments_lexer": "scala",
-                "version": "2.11.8"
-            }
-        },
-        "nbformat": 4,
-        "nbformat_minor": 2,
-        "cells" : cells,
-    })
+            "nbformat": 4,
+            "nbformat_minor": 2,
+            "cells": cells,
+        })
+    elif p_version == 2:
+        notebook = nbformat.from_dict({
+            "metadata": {
+                "kernelspec": {
+                    "display_name": "Python 2",
+                    "language": "python",
+                    "name": "python2"
+                },
+                "language_info": {
+                    "codemirror_mode": {
+                        "name": "ipython",
+                        "version": 2
+                    },
+                    "file_extension": ".py",
+                    "mimetype": "text/x-python",
+                    "name": "python",
+                    "nbconvert_exporter": "python",
+                    "pygments_lexer": "ipython2",
+                    "version": "2.7.5"
+                }
+            },
+            "nbformat": 4,
+            "nbformat_minor": 2,
+            "cells": cells,
+        })
 
     return (notebook_name, notebook)
 
@@ -151,17 +180,18 @@ def write_notebook(notebook_name, notebook, path=None):
 
     If path is None, the output path will be created the notebook name in the current directory.
     """
-    filename = path
-    if not filename:
-        filename = notebook_name + '.ipynb'
-        if os.path.exists(filename):
-            for i in range(1, 1000):
-                filename = notebook_name + ' (' + str(i) + ').ipynb'
-                if not os.path.exists(filename):
-                    break
-                if i == 1000:
-                    raise RuntimeError('Cannot write %s: versions 1-1000 already exist.' % (notebook_name,))
+    # filename = path
+    # if not filename:
+    #
+    #     if os.path.exists(filename):
+    #         for i in range(1, 1000):
+    #             filename = notebook_name + ' (' + str(i) + ').ipynb'
+    #             if not os.path.exists(filename):
+    #                 break
+    #             if i == 1000:
+    #                 raise RuntimeError('Cannot write %s: versions 1-1000 already exist.' % (notebook_name,))
 
+    filename = path + '/' + notebook_name + '.ipynb'
     with codecs.open(filename, 'w', encoding='UTF-8') as io:
         nbformat.write(notebook, io)
 
@@ -172,14 +202,18 @@ if __name__ == '__main__':
 
     zeppelin_note_path = None
     target_path = None
-    if num_args == 2:
+    p_version = 3
+    if num_args == 3:
         zeppelin_note_path = sys.argv[1]
-    elif num_args == 3:
         target_path = sys.argv[2]
+    elif num_args == 4:
+        zeppelin_note_path = sys.argv[1]
+        target_path = sys.argv[2]
+        p_version = sys.argv[3]
 
     if not zeppelin_note_path:
         exit()
 
-    name, content = convert_json(read_io(zeppelin_note_path))
+    name, content = convert_json(read_io(zeppelin_note_path), p_version)
     write_notebook(name, content, target_path)
 
